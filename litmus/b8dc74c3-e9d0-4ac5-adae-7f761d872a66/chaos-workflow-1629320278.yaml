@@ -1,0 +1,203 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  creationTimestamp: null
+  labels:
+    cluster_id: e029732b-f503-499c-b576-e48396a30b64
+    subject: chaos-workflow_litmus
+    workflow_id: c68234a9-2980-449e-b5c6-6aa5a78ba10e
+    workflows.argoproj.io/controller-instanceid: e029732b-f503-499c-b576-e48396a30b64
+  name: chaos-workflow-1629320278
+  namespace: litmus
+spec:
+  arguments:
+    parameters:
+    - name: adminModeNamespace
+      value: litmus
+  entrypoint: custom-chaos
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+  serviceAccountName: argo-chaos
+  templates:
+  - arguments: {}
+    inputs: {}
+    metadata: {}
+    name: custom-chaos
+    outputs: {}
+    steps:
+    - - arguments: {}
+        name: install-chaos-experiments
+        template: install-chaos-experiments
+    - - arguments: {}
+        name: ec2-terminate-by-id
+        template: ec2-terminate-by-id
+  - arguments: {}
+    container:
+      args:
+      - kubectl apply -f /tmp/ec2-terminate-by-id.yaml -n {{workflow.parameters.adminModeNamespace}} |  sleep 30
+      command:
+      - sh
+      - -c
+      image: litmuschaos/k8s:latest
+      name: ""
+      resources: {}
+    inputs:
+      artifacts:
+      - name: ec2-terminate-by-id
+        path: /tmp/ec2-terminate-by-id.yaml
+        raw:
+          data: |
+            apiVersion: litmuschaos.io/v1alpha1
+            description:
+              message: |
+                Detaching an ebs volume from ec2 instance.
+            kind: ChaosExperiment
+            metadata:
+              name: ec2-terminate-by-id
+              labels:
+                name: ec2-terminate-by-id
+                app.kubernetes.io/part-of: litmus
+                app.kubernetes.io/component: chaosexperiment
+                app.kubernetes.io/version: 1.13.7
+            spec:
+              definition:
+                scope: Cluster
+                permissions:
+                  - apiGroups:
+                      - ""
+                      - batch
+                      - litmuschaos.io
+                    resources:
+                      - jobs
+                      - pods
+                      - events
+                      - pods/log
+                      - pods/exec
+                      - secrets
+                      - chaosengines
+                      - chaosexperiments
+                      - chaosresults
+                    verbs:
+                      - create
+                      - list
+                      - get
+                      - patch
+                      - update
+                      - delete
+                image: litmuschaos/go-runner:1.13.7
+                imagePullPolicy: Always
+                args:
+                  - -c
+                  - ./experiments -name ec2-terminate-by-id
+                command:
+                  - /bin/bash
+                env:
+                  - name: TOTAL_CHAOS_DURATION
+                    value: "30"
+                  - name: CHAOS_INTERVAL
+                    value: "30"
+                  - name: RAMP_TIME
+                    value: ""
+                  - name: MANAGED_NODEGROUP
+                    value: disable
+                  - name: EC2_INSTANCE_ID
+                    value: ""
+                  - name: REGION
+                    value: ""
+                  - name: SEQUENCE
+                    value: parallel
+                  - name: AWS_SHARED_CREDENTIALS_FILE
+                    value: /tmp/cloud_config.yml
+                  - name: LIB
+                    value: litmus
+                labels:
+                  name: ec2-terminate-by-id
+                  app.kubernetes.io/part-of: litmus
+                  app.kubernetes.io/component: experiment-job
+                  app.kubernetes.io/version: 1.13.7
+                secrets:
+                  - name: cloud-secret
+                    mountPath: /tmp/
+    metadata: {}
+    name: install-chaos-experiments
+    outputs: {}
+  - arguments: {}
+    container:
+      args:
+      - -file=/tmp/chaosengine-ec2-terminate-by-id.yaml
+      - -saveName=/tmp/engine-name
+      image: litmuschaos/litmus-checker:latest
+      name: ""
+      resources: {}
+    inputs:
+      artifacts:
+      - name: ec2-terminate-by-id
+        path: /tmp/chaosengine-ec2-terminate-by-id.yaml
+        raw:
+          data: |
+            apiVersion: litmuschaos.io/v1alpha1
+            kind: ChaosEngine
+            metadata:
+              namespace: "{{workflow.parameters.adminModeNamespace}}"
+              generateName: ec2-terminate-by-id-1621404441
+              labels:
+                instance_id: 90bed170-5ac7-4d08-ba26-6e3c71fe80d4
+                workflow_name: chaos-workflow-1629320278
+            spec:
+              annotationCheck: "false"
+              engineState: active
+              chaosServiceAccount: litmus-admin
+              jobCleanUpPolicy: retain
+              experiments:
+                - name: ec2-terminate-by-id
+                  spec:
+                    probe:
+                      - name: sock-shop-http-probe
+                        type: httpProbe
+                        httpProbe/inputs:
+                          url: http://34.222.200.44:30001
+                          insecureSkipVerify: false
+                          method:
+                            get:
+                              criteria: ==
+                              responseCode: "200"
+                        mode: Continuous
+                        runProperties:
+                          probeTimeout: 10
+                          interval: 5
+                          retry: 1
+                          probePollingInterval: 2
+                      - name: check-perf-recovery
+                        type: promProbe
+                        promProbe/inputs:
+                          endpoint: http://44.242.146.190:31090
+                          query: sum(rate(request_duration_seconds_count{job='sock-shop/front-end',route='/',status_code='200'}[20s]))*100
+                          comparator:
+                            criteria: ">="
+                            value: "100"
+                        mode: Edge
+                        runProperties:
+                          probeTimeout: 2
+                          interval: 1
+                          retry: 2
+                    components:
+                      env:
+                        - name: TOTAL_CHAOS_DURATION
+                          value: "30"
+                        - name: CHAOS_INTERVAL
+                          value: "30"
+                        - name: EC2_INSTANCE_ID
+                          value: i-0db1ae100c7511211
+                        - name: REGION
+                          value: us-west-2
+                        - name: MANAGED_NODEGROUP
+                          value: disable
+    metadata:
+      labels:
+        weight: "10"
+    name: ec2-terminate-by-id
+    outputs: {}
+status:
+  finishedAt: null
+  startedAt: null
